@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="kk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OyOrda meeting — MVP</title>
+  <script defer src="https://unpkg.com/@daily-co/daily-js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; background:#0b0f14; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:#e6eef7; }
+    .app { display: grid; grid-template-columns: 2fr 1.2fr; grid-template-rows: auto 1fr; gap: 12px; height: 100vh; padding: 12px; box-sizing: border-box; }
+    header { grid-column: 1 / -1; display:flex; align-items:center; justify-content:space-between; }
+    h1 { font-size: 18px; margin: 0; }
+    .btn { appearance:none; border:0; padding:10px 14px; border-radius:10px; font-weight:600; cursor:pointer; background:#1b2533; color:#e6eef7; }
+    .btn:hover { filter:brightness(1.1); }
+    .danger { background:#a21b2e; }
+    .ok { background:#176b42; }
+    .grid { display:grid; gap:12px; grid-template-rows: 1fr 320px; height: calc(100vh - 72px); }
+    #video { position: relative; width: 100%; height: 100%; border-radius: 16px; overflow: hidden; background:#101820; }
+    #slidesWrap { background:#101820; border-radius:16px; overflow:hidden; position:relative; }
+    #slides { width:100%; height:100%; border:0; }
+    .topbar { display:flex; gap:8px; align-items:center; }
+    .notice { font-size:12px; opacity:0.8; }
+    /* Overlay to block selecting/closing in UI area */
+    .shield { position:fixed; inset:0; pointer-events:none; }
+    .no-select { user-select:none; -webkit-user-select:none; }
+  </style>
+</head>
+<body class="no-select">
+  <div class="app">
+    <header>
+      <h1>🟢 OyOrda meeting</h1>
+      <div class="topbar">
+        <button id="fsBtn" class="btn ok" title="Толық экран">Fullscreen</button>
+        <button id="lockBtn" class="btn" title="Кілттеу">Focus lock</button>
+        <!-- Ескерту: Leave батырмасы жоқ. -->
+      </div>
+    </header>
+
+    <div class="grid">
+      <div id="video"></div>
+
+      <div id="slidesWrap">
+        <iframe id="slides" src="about:blank" allowfullscreen></iframe>
+      </div>
+    </div>
+  </div>
+
+  <div class="shield" aria-hidden="true"></div>
+
+  <script>
+    // ==== CONFIGURATIONS ====
+    const ROOM_URL = "https://oyorda-meeting.daily.co/oyorda-meeting"; // Ready to use
+    // API KEY ЕНГІЗБЕҢІЗ — клиентке қойылмайды. Бұл MVP Prebuilt-ке тікелей қосылады.
+
+    // ==== FULLSCREEN & EXIT-PREVENTION ====
+    const requestFS = async () => {
+      try {
+        if (!document.fullscreenElement) {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch(e){ console.warn(e); }
+    };
+
+    // Prevent tab/window closing and warn on navigation
+    window.addEventListener('beforeunload', (e) => {
+      e.preventDefault();
+      e.returnValue = 'Кеш аяқталған жоқ. Терезені жаппаңыз!';
+    });
+
+    // Warn if user tries to switch away
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) alert('Назар аударыңыз: Кеш барысында беттен шықпаңыз.');
+    });
+
+    // Block common close shortcuts (Ctrl/Cmd+W) & open devtools shortcuts
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && (key === 'w' || key === 'r')) { e.preventDefault(); }
+      if (e.key === 'F11') e.preventDefault();
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (key === 'i' || key === 'j' || key === 'c')) { e.preventDefault(); }
+    }, true);
+
+    // Disable context menu (right click)
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // ==== DAILY PREBUILT EMBED ====
+    let callFrame;
+
+    function mountDaily() {
+      const container = document.getElementById('video');
+      if (!window.DailyIframe) {
+        alert('Daily кітапханасы жүктелмеді. Интернетті тексеріңіз.');
+        return;
+      }
+
+      callFrame = window.DailyIframe.createFrame(container, {
+        // iframe стилі
+        iframeStyle: {
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: '0',
+        },
+        // UI параметрлері: leave батырмасын жасыруға тырысамыз (кейбір аккаунттарда қолжетімді)
+        showLeaveButton: false,
+        showFullscreenButton: false,
+        showLocalVideo: true,
+      });
+
+      callFrame.join({ url: ROOM_URL });
+
+      // Егер қатысушы meeting-тен шықса — дереу қайта қосамыз
+      callFrame.on('left-meeting', () => {
+        // Авто-қайта қосылу
+        setTimeout(() => callFrame.join({ url: ROOM_URL }), 500);
+      });
+
+      // Focus lock: тышқан курсорын бет ішінде ұстау (шығуды күрделендіреді)
+      document.getElementById('lockBtn').addEventListener('click', async () => {
+        try {
+          await document.body.requestPointerLock();
+          alert('Фокус кілттелді. Шығу үшін Alt+Tab пайдаланбаңыз.');
+        } catch(e){}
+      });
+
+      // Fullscreen button
+      document.getElementById('fsBtn').addEventListener('click', requestFS);
+      // Авто-FS on load
+      requestFS();
+    }
+
+    // ==== SLIDES SUPPORT ====
+    // Слайд ретінде сыртқы PDF/сурет сілтемесін prompt арқылы қоя саламыз (MVP)
+    function loadSlides() {
+      const url = sessionStorage.getItem('oyorda_slides_url') || '';
+      const chosen = url || prompt('Слайд сілтемесін енгізіңіз (PDF / сурет URL):', '');
+      if (chosen) {
+        sessionStorage.setItem('oyorda_slides_url', chosen);
+        document.getElementById('slides').src = chosen;
+      } else {
+        // бос қалса — бейтарап бет
+        document.getElementById('slides').src = 'about:blank';
+      }
+    }
+
+    // Init
+    window.addEventListener('load', () => {
+      mountDaily();
+      loadSlides();
+    });
+  </script>
+</body>
+</html>
